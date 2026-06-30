@@ -264,6 +264,19 @@
       "tags": [
         "wander"
       ]
+    },
+    {
+      "id": "player-frontend",
+      "name": "3D歌词",
+      "description": "仿Mineradio歌词页",
+      "author": "xiaotian2333",
+      "path": "",
+      "repo": "https://github.com/xiaotian2333/EchoMusic-player-frontend",
+      "homepage": "hhttps://github.com/xiaotian2333/EchoMusic-player-frontend",
+      "tags": [
+        "player",
+        "lyrics"
+      ]
     }
   ]
 }
