@@ -291,6 +291,16 @@
         "lyrics",
         "lyric-effects"
       ]
+    },
+    {
+      "id": "vertical-lyric-scroll",
+      "path": "vertical-lyric-scroll",
+      "homepage": "https://github.com/hoowhoami/EchoMusicPlugins/tree/main/vertical-lyric-scroll",
+      "tags": [
+        "lyrics",
+        "floating-window",
+        "appearance"
+      ]
     }
   ]
 }
