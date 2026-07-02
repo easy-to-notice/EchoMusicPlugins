@@ -753,6 +753,23 @@ await db.transaction([
 ]);
 ```
 
+二进制 BLOB：
+
+```js
+await db.exec("CREATE TABLE IF NOT EXISTS covers (id TEXT PRIMARY KEY, data BLOB)");
+
+// 写入 hex 或 base64 均可；宿主会按 SQLite BLOB 绑定参数。
+await db.run("INSERT OR REPLACE INTO covers (id, data) VALUES (?, ?)", [
+  "album-cover",
+  { type: "base64", data: "iVBORw0KGgo=" },
+]);
+
+const row = await db.get("SELECT data FROM covers WHERE id = ?", ["album-cover"]);
+if (row.ok && row.row?.data?.type === "hex") {
+  console.log(row.row.data.data); // 查询 BLOB 时统一返回 hex 字符串
+}
+```
+
 管理数据库：
 
 ```js
@@ -766,8 +783,8 @@ await ctx.sqlite.deleteDatabase("library");
 
 - 数据库文件存放在 EchoMusic 用户数据目录的插件私有区，插件无法访问其他插件或主程序数据库。
 - 数据库名默认 `main`，只能包含字母、数字、点、下划线和短横线，且必须以字母或数字开头。
-- 参数只支持数组形式的 `string`、`number`、`boolean` 和 `null`；如需保存二进制，建议自行转成 base64/hex 字符串。
-- 查询结果中的 BLOB 会返回 `{ type: "hex", data }`。
+- 参数只支持数组形式的 `string`、`number`、`boolean`、`null`、`{ type: "hex", data }` 和 `{ type: "base64", data }`；二进制参数会作为 SQLite BLOB 写入。
+- 查询结果中的 BLOB 会返回 `{ type: "hex", data }`，`data` 为小写 hex 字符串。
 - 宿主会拦截 `ATTACH`、`DETACH`、`VACUUM INTO`、`load_extension()`、`PRAGMA database_list` 等可能越界或泄露路径的语句。
 - 单条 SQL 最长约 256 KB；单次查询最多 5000 行，结果 JSON 最大约 8 MB；单个事务最多 500 条语句。
 - 插件禁用、安全模式、运行上下文销毁或 EchoMusic 退出时会自动关闭连接；插件卸载时会删除该插件的 SQLite 私有目录。
