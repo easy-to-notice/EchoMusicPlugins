@@ -164,12 +164,27 @@ const getTargetFrameMs = () => {
   return 1000 / frameRate;
 };
 
+const updatePlayerRenderState = (entry) => {
+  const playerElement = entry.playerElement;
+  const childCount = playerElement?.childElementCount || 0;
+  const className = playerElement?.className || "";
+  const hasCoreClass = Boolean(playerElement?.classList.contains("amll-lyric-player"));
+
+  entry.amllReady = Boolean(entry.player && hasCoreClass && childCount > 2);
+  entry.container.dataset.echoAmllClass = className;
+  entry.container.dataset.echoAmllChildren = String(childCount);
+  entry.container.dataset.echoAmllReady = entry.amllReady ? "true" : "false";
+  return entry.amllReady;
+};
+
 const syncHostState = (entry, snapshot) => {
   if (!state) return;
   const settings = state.settings;
   const enabled = isEffectActive(snapshot) ? "true" : "false";
   const hideNative =
-    isEffectActive(snapshot) && settings.hideNativeLyrics ? "true" : "false";
+    isEffectActive(snapshot) && settings.hideNativeLyrics && entry.amllReady
+      ? "true"
+      : "false";
 
   if (entry.host.root.dataset.echoAmllEnabled !== enabled) {
     entry.host.root.dataset.echoAmllEnabled = enabled;
@@ -184,11 +199,12 @@ const ensurePlayer = (entry) => {
   if (!entry.container.isConnected) {
     entry.host.overlay.appendChild(entry.container);
   }
-  const playerElement = document.createElement("div");
-  playerElement.className = "echo-amll-player";
-  entry.container.appendChild(playerElement);
+  const player = new LyricPlayer();
+  const playerElement = player.getElement();
+  playerElement.classList.add("echo-amll-player");
+  entry.container.replaceChildren(playerElement);
+  entry.player = player;
   entry.playerElement = playerElement;
-  entry.player = new LyricPlayer(playerElement);
   entry.optionsKey = "";
   entry.optionValues = {};
   entry.linesSignature = "";
@@ -202,7 +218,9 @@ const disposePlayer = (entry) => {
   entry.player.dispose?.();
   entry.player = null;
   entry.playerElement = null;
+  entry.amllReady = false;
   entry.container.dataset.echoAmllPlayer = "false";
+  entry.container.dataset.echoAmllReady = "false";
   entry.optionsKey = "";
   entry.optionValues = {};
   entry.linesSignature = "";
@@ -211,6 +229,35 @@ const disposePlayer = (entry) => {
   entry.lastTimelineMs = Number.NaN;
   entry.lastPlaying = undefined;
   entry.container.replaceChildren();
+};
+
+const forcePlayerLayout = (entry, snapshot) => {
+  if (!entry.player) return;
+  const timelineMs = getTimelineMs(snapshot);
+  entry.player.setCurrentTime(timelineMs, true);
+  if (typeof entry.player.calcLayout === "function") {
+    void Promise.resolve(entry.player.calcLayout(true, true))
+      .then(() => {
+        entry.player?.update(0);
+        updatePlayerRenderState(entry);
+        syncHostState(entry, snapshot);
+      })
+      .catch(() => undefined);
+  }
+  entry.player.update(0);
+  updatePlayerRenderState(entry);
+  syncHostState(entry, snapshot);
+  entry.lastTimelineMs = timelineMs;
+};
+
+const schedulePlayerLayout = (entry, snapshot) => {
+  if (entry.layoutFrameId) {
+    window.cancelAnimationFrame(entry.layoutFrameId);
+  }
+  entry.layoutFrameId = window.requestAnimationFrame(() => {
+    entry.layoutFrameId = 0;
+    forcePlayerLayout(entry, snapshot);
+  });
 };
 
 const applyPlayerOptions = (entry, snapshot, forceRelayout = false) => {
@@ -291,11 +338,15 @@ const syncLines = (entry, snapshot, force = false) => {
   entry.linesSignature = signature;
   entry.lyricsMode = lyricsMode;
   const amllLines = convertEchoLinesToAmll(snapshot?.lines, lyricsMode);
+  entry.amllReady = false;
   entry.container.dataset.echoAmllLines = String(amllLines.length);
   entry.container.dataset.echoAmllPlayer = entry.player ? "true" : "false";
   entry.player.setLyricLines(amllLines, getTimelineMs(snapshot));
+  updatePlayerRenderState(entry);
+  syncHostState(entry, snapshot);
   entry.lastTimelineMs = Number.NaN;
   applyPlayerOptions(entry, snapshot, true);
+  schedulePlayerLayout(entry, snapshot);
 };
 
 const stopFrameLoop = (entry) => {
@@ -404,6 +455,8 @@ const mountAmllPageLyrics = (host) => {
     linesLength: 0,
     lyricsMode: "none",
     frameId: 0,
+    layoutFrameId: 0,
+    amllReady: false,
     lastFrameTime: 0,
     lastTimelineMs: Number.NaN,
     lastPlaying: undefined,
@@ -423,6 +476,7 @@ const mountAmllPageLyrics = (host) => {
     mountedHosts.delete(entry);
     entry.unsubscribe?.();
     stopFrameLoop(entry);
+    if (entry.layoutFrameId) window.cancelAnimationFrame(entry.layoutFrameId);
     entry.host.root.removeAttribute("data-echo-amll-enabled");
     entry.host.root.removeAttribute("data-echo-amll-hide-native");
     disposePlayer(entry);
@@ -444,9 +498,16 @@ const AMLL_PLUGIN_CSS = `
   inset: 0;
   width: 100%;
   height: 100%;
+  min-height: 240px;
   opacity: 0;
   transition: opacity 0.18s ease;
   pointer-events: none;
+}
+
+.echo-amll-player {
+  width: 100%;
+  height: 100%;
+  min-height: 240px;
 }
 
 .echo-amll-page[data-echo-amll-enabled="true"] .echo-amll-player-shell {

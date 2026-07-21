@@ -21851,11 +21851,22 @@ var getTargetFrameMs = () => {
   const frameRate = clamp2(state?.settings?.frameRate ?? DEFAULT_SETTINGS.frameRate, 15, 60);
   return 1e3 / frameRate;
 };
+var updatePlayerRenderState = (entry) => {
+  const playerElement = entry.playerElement;
+  const childCount = playerElement?.childElementCount || 0;
+  const className = playerElement?.className || "";
+  const hasCoreClass = Boolean(playerElement?.classList.contains("amll-lyric-player"));
+  entry.amllReady = Boolean(entry.player && hasCoreClass && childCount > 2);
+  entry.container.dataset.echoAmllClass = className;
+  entry.container.dataset.echoAmllChildren = String(childCount);
+  entry.container.dataset.echoAmllReady = entry.amllReady ? "true" : "false";
+  return entry.amllReady;
+};
 var syncHostState = (entry, snapshot) => {
   if (!state) return;
   const settings2 = state.settings;
   const enabled = isEffectActive(snapshot) ? "true" : "false";
-  const hideNative = isEffectActive(snapshot) && settings2.hideNativeLyrics ? "true" : "false";
+  const hideNative = isEffectActive(snapshot) && settings2.hideNativeLyrics && entry.amllReady ? "true" : "false";
   if (entry.host.root.dataset.echoAmllEnabled !== enabled) {
     entry.host.root.dataset.echoAmllEnabled = enabled;
   }
@@ -21868,11 +21879,12 @@ var ensurePlayer = (entry) => {
   if (!entry.container.isConnected) {
     entry.host.overlay.appendChild(entry.container);
   }
-  const playerElement = document.createElement("div");
-  playerElement.className = "echo-amll-player";
-  entry.container.appendChild(playerElement);
+  const player = new DomLyricPlayer();
+  const playerElement = player.getElement();
+  playerElement.classList.add("echo-amll-player");
+  entry.container.replaceChildren(playerElement);
+  entry.player = player;
   entry.playerElement = playerElement;
-  entry.player = new DomLyricPlayer(playerElement);
   entry.optionsKey = "";
   entry.optionValues = {};
   entry.linesSignature = "";
@@ -21885,7 +21897,9 @@ var disposePlayer = (entry) => {
   entry.player.dispose?.();
   entry.player = null;
   entry.playerElement = null;
+  entry.amllReady = false;
   entry.container.dataset.echoAmllPlayer = "false";
+  entry.container.dataset.echoAmllReady = "false";
   entry.optionsKey = "";
   entry.optionValues = {};
   entry.linesSignature = "";
@@ -21894,6 +21908,31 @@ var disposePlayer = (entry) => {
   entry.lastTimelineMs = Number.NaN;
   entry.lastPlaying = void 0;
   entry.container.replaceChildren();
+};
+var forcePlayerLayout = (entry, snapshot) => {
+  if (!entry.player) return;
+  const timelineMs = getTimelineMs(snapshot);
+  entry.player.setCurrentTime(timelineMs, true);
+  if (typeof entry.player.calcLayout === "function") {
+    void Promise.resolve(entry.player.calcLayout(true, true)).then(() => {
+      entry.player?.update(0);
+      updatePlayerRenderState(entry);
+      syncHostState(entry, snapshot);
+    }).catch(() => void 0);
+  }
+  entry.player.update(0);
+  updatePlayerRenderState(entry);
+  syncHostState(entry, snapshot);
+  entry.lastTimelineMs = timelineMs;
+};
+var schedulePlayerLayout = (entry, snapshot) => {
+  if (entry.layoutFrameId) {
+    window.cancelAnimationFrame(entry.layoutFrameId);
+  }
+  entry.layoutFrameId = window.requestAnimationFrame(() => {
+    entry.layoutFrameId = 0;
+    forcePlayerLayout(entry, snapshot);
+  });
 };
 var applyPlayerOptions = (entry, snapshot, forceRelayout = false) => {
   if (!state) return;
@@ -21960,11 +21999,15 @@ var syncLines = (entry, snapshot, force = false) => {
   entry.linesSignature = signature;
   entry.lyricsMode = lyricsMode;
   const amllLines = convertEchoLinesToAmll(snapshot?.lines, lyricsMode);
+  entry.amllReady = false;
   entry.container.dataset.echoAmllLines = String(amllLines.length);
   entry.container.dataset.echoAmllPlayer = entry.player ? "true" : "false";
   entry.player.setLyricLines(amllLines, getTimelineMs(snapshot));
+  updatePlayerRenderState(entry);
+  syncHostState(entry, snapshot);
   entry.lastTimelineMs = Number.NaN;
   applyPlayerOptions(entry, snapshot, true);
+  schedulePlayerLayout(entry, snapshot);
 };
 var stopFrameLoop = (entry) => {
   if (!entry.frameId) return;
@@ -22053,6 +22096,8 @@ var mountAmllPageLyrics = (host) => {
     linesLength: 0,
     lyricsMode: "none",
     frameId: 0,
+    layoutFrameId: 0,
+    amllReady: false,
     lastFrameTime: 0,
     lastTimelineMs: Number.NaN,
     lastPlaying: void 0,
@@ -22069,6 +22114,7 @@ var mountAmllPageLyrics = (host) => {
     mountedHosts.delete(entry);
     entry.unsubscribe?.();
     stopFrameLoop(entry);
+    if (entry.layoutFrameId) window.cancelAnimationFrame(entry.layoutFrameId);
     entry.host.root.removeAttribute("data-echo-amll-enabled");
     entry.host.root.removeAttribute("data-echo-amll-hide-native");
     disposePlayer(entry);
@@ -22089,9 +22135,16 @@ var AMLL_PLUGIN_CSS = `
   inset: 0;
   width: 100%;
   height: 100%;
+  min-height: 240px;
   opacity: 0;
   transition: opacity 0.18s ease;
   pointer-events: none;
+}
+
+.echo-amll-player {
+  width: 100%;
+  height: 100%;
+  min-height: 240px;
 }
 
 .echo-amll-page[data-echo-amll-enabled="true"] .echo-amll-player-shell {
