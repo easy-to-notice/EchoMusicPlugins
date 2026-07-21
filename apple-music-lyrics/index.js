@@ -21865,7 +21865,14 @@ var syncHostState = (entry, snapshot) => {
 };
 var ensurePlayer = (entry) => {
   if (entry.player) return true;
-  entry.player = new DomLyricPlayer(entry.container);
+  if (!entry.container.isConnected) {
+    entry.host.overlay.appendChild(entry.container);
+  }
+  const playerElement = document.createElement("div");
+  playerElement.className = "echo-amll-player";
+  entry.container.appendChild(playerElement);
+  entry.playerElement = playerElement;
+  entry.player = new DomLyricPlayer(playerElement);
   entry.optionsKey = "";
   entry.optionValues = {};
   entry.linesSignature = "";
@@ -21877,6 +21884,8 @@ var disposePlayer = (entry) => {
   if (!entry.player) return;
   entry.player.dispose?.();
   entry.player = null;
+  entry.playerElement = null;
+  entry.container.dataset.echoAmllPlayer = "false";
   entry.optionsKey = "";
   entry.optionValues = {};
   entry.linesSignature = "";
@@ -21951,6 +21960,8 @@ var syncLines = (entry, snapshot, force = false) => {
   entry.linesSignature = signature;
   entry.lyricsMode = lyricsMode;
   const amllLines = convertEchoLinesToAmll(snapshot?.lines, lyricsMode);
+  entry.container.dataset.echoAmllLines = String(amllLines.length);
+  entry.container.dataset.echoAmllPlayer = entry.player ? "true" : "false";
   entry.player.setLyricLines(amllLines, getTimelineMs(snapshot));
   entry.lastTimelineMs = Number.NaN;
   applyPlayerOptions(entry, snapshot, true);
@@ -22034,6 +22045,7 @@ var mountAmllPageLyrics = (host) => {
   const entry = {
     host,
     player: null,
+    playerElement: null,
     container,
     snapshot: host.getSnapshot(),
     linesSignature: "",
