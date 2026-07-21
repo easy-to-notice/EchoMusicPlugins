@@ -228,6 +228,10 @@ const ensurePlayer = (entry) => {
 };
 
 const disposePlayer = (entry) => {
+  if (entry.layoutFrameId) {
+    window.cancelAnimationFrame(entry.layoutFrameId);
+    entry.layoutFrameId = 0;
+  }
   if (!entry.player) return;
   entry.player.dispose?.();
   entry.player = null;
@@ -248,18 +252,20 @@ const disposePlayer = (entry) => {
 
 const forcePlayerLayout = (entry, snapshot) => {
   if (!entry.player) return;
+  const player = entry.player;
   const timelineMs = getTimelineMs(snapshot);
-  entry.player.setCurrentTime(timelineMs, true);
-  if (typeof entry.player.calcLayout === "function") {
-    void Promise.resolve(entry.player.calcLayout(true, true))
+  player.setCurrentTime(timelineMs, true);
+  if (typeof player.calcLayout === "function") {
+    void Promise.resolve(player.calcLayout(true, true))
       .then(() => {
-        entry.player?.update(0);
+        if (entry.player !== player) return;
+        player.update(0);
         updatePlayerRenderState(entry);
         syncHostState(entry, snapshot);
       })
       .catch(() => undefined);
   }
-  entry.player.update(0);
+  player.update(0);
   updatePlayerRenderState(entry);
   syncHostState(entry, snapshot);
   entry.lastTimelineMs = timelineMs;
@@ -593,33 +599,21 @@ const AMLL_PLUGIN_CSS = `
 .echo-amll-player-shell .amll-lyric-player [class*="_lyricMainLine"] {
   color: var(--echo-amll-unplayed-color, rgba(255, 255, 255, 0.92));
   font-weight: var(--echo-amll-font-weight, 850);
-  text-align: center;
 }
 
 .echo-amll-player-shell .amll-lyric-player [class*="_lyricSubLine"] {
   color: var(--echo-amll-unplayed-color, rgba(255, 255, 255, 0.9));
   opacity: var(--echo-amll-sub-opacity, 0.66) !important;
-  text-align: center;
 }
 
 .echo-amll-player-shell .amll-lyric-player [class*="_lyricBgLine"] {
   color: var(--echo-amll-unplayed-color, rgba(255, 255, 255, 0.86));
   opacity: var(--echo-amll-bg-opacity, 0.58) !important;
-  text-align: center;
 }
 
-.echo-amll-player-shell .amll-lyric-player [class*="_lyricLineWrapper"] {
-  align-items: center;
-  text-align: center;
-}
-
-.echo-amll-player-shell .amll-lyric-player [class*="_lyricLine"] {
-  text-align: center;
-  transform-origin: center;
-}
-
-.echo-amll-player-shell .amll-lyric-player [class*="_lyricMainLine"] span {
-  text-align: center;
+.lyric-mode .echo-amll-player-shell .amll-lyric-player,
+.portrait-mode .echo-amll-player-shell .amll-lyric-player {
+  --lyric-line-padding-x: clamp(42px, 8vw, 132px);
 }
 
 .echo-amll-player-shell .amll-lyric-player [class*="_lyricLine"][class*="_active"] [class*="_lyricMainLine"],
