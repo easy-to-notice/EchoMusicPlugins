@@ -515,15 +515,37 @@ const AMLL_PLUGIN_CSS = `
 }
 
 .echo-amll-player-shell .amll-lyric-player {
-  --amll-lp-color: color-mix(in srgb, var(--color-text-main, #fff) 88%, #fff);
+  --amll-lp-color: rgba(255, 255, 255, 0.98);
   --amll-lp-bg-color: transparent;
-  --amll-lp-hover-bg-color: transparent;
+  --amll-lp-hover-bg-color: rgba(255, 255, 255, 0.08);
   --amll-lp-font-size: clamp(28px, 4.8vh, 54px);
   --amll-lp-line-width-aspect: 0.86;
   --amll-lp-line-padding-x: 0.35em;
   --amll-lp-bg-line-scale: 0.74;
+  color: rgba(255, 255, 255, 0.98);
   mix-blend-mode: normal;
-  text-shadow: 0 12px 36px rgba(0, 0, 0, 0.18);
+  text-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.48),
+    0 12px 32px rgba(0, 0, 0, 0.34);
+}
+
+.echo-amll-player-shell .amll-lyric-player [class*="_lyricMainLine"] {
+  color: rgba(255, 255, 255, 0.98);
+  font-weight: 850;
+}
+
+.echo-amll-player-shell .amll-lyric-player [class*="_lyricSubLine"] {
+  color: rgba(255, 255, 255, 0.9);
+  opacity: 0.66 !important;
+}
+
+.echo-amll-player-shell .amll-lyric-player [class*="_lyricBgLine"] {
+  color: rgba(255, 255, 255, 0.86);
+  opacity: 0.58 !important;
+}
+
+.echo-amll-player-shell .amll-lyric-player [class*="_active"] {
+  color: #fff;
 }
 `;
 
