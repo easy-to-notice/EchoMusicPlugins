@@ -1917,7 +1917,7 @@ export function activate(ctx) {
 | `host.root`      | 歌词动效根节点，即 `.echo-lyric-effect-host`。                                |
 | `host.scroller`  | 歌词滚动容器。                                                               |
 | `host.overlay`   | 宿主管理的装饰层，默认 `pointer-events: none`，适合挂 SVG、Canvas、光效层。   |
-| `host.getSnapshot()` | 读取当前歌词快照，包括 `lines`、`currentIndex`、`scrollIndex`、`timelineMs`、`isPlaying`、`lyricsMode`、`collapsed`、`reducedMotion`、`appearance` 等。`timelineMs` 是宿主统一后的歌词时间轴（毫秒，已包含歌词偏移），适合逐帧动画、逐字高亮和滚动计算；不要用 `ctx.player.currentTime` 代替它。`appearance` 包含宿主歌词外观语义，如 `playedColor`、`unplayedColor`、`fontFamily`、`fontScale`、`fontWeight`，插件应优先复用这些字段而不是读取原生歌词 DOM 样式。 |
+| `host.getSnapshot()` | 读取当前歌词快照，包括 `lines`、`currentIndex`、`scrollIndex`、`timelineMs`、`isPlaying`、`lyricsMode`、`collapsed`、`reducedMotion`、`appearance` 等。`timelineMs` 是宿主统一后的歌词时间轴（毫秒，已包含歌词偏移），适合逐帧动画、逐字高亮和滚动计算；不要用 `ctx.player.currentTime` 代替它。`currentIndex` 与宿主写入的 `data-echo-lyric-current` / `data-echo-lyric-current-index` 使用同一稳定索引源。`appearance` 包含宿主歌词外观语义，如 `playedColor`、`unplayedColor`、`fontFamily`、`fontScale`、`fontWeight`，插件应优先复用这些字段而不是读取原生歌词 DOM 样式。 |
 | `host.subscribe(handler)` | 订阅歌词快照更新，返回取消订阅函数；插件停用时宿主也会兜底清理。       |
 | `host.setAutoScrollHandler(handler)` | 接管页面歌词自动跟随滚动。handler 收到 `{ index, targetTop, smooth, collapsed, snapshot }`，返回 `true` 表示插件已处理，宿主不再执行默认 `scrollTo`。 |
 | `host.requestUpdate()` | 请求宿主立即向订阅者派发一次当前快照。                                  |
@@ -1944,6 +1944,7 @@ export function activate(ctx) {
 最佳实践：
 
 - 用 `className` 限定 CSS 作用域，例如 `.my-water-lyrics [data-echo-lyric-line]`，避免影响其它页面。
+- CSS 动效可以直接使用 `[data-echo-lyric-current="true"]` 等宿主标记；在 `host.subscribe()` 的 JS 回调中，请优先以 `snapshot.currentIndex` / `snapshot.timelineMs` 为准计算状态，避免自行覆盖宿主的 `data-echo-lyric-*` 属性。
 - 优先叠加样式和装饰层，不要替换宿主歌词滚动容器；完整替换渲染器会更脆弱。
 - 尊重 `snapshot.reducedMotion` 或根节点 `data-echo-lyric-reduced-motion="true"`，降低或关闭高频动画。
 - 桌面歌词插件如需在桌面歌词独立窗口运行，需要在 manifest 中设置 `runtime.desktopLyric: true`。只在主窗口注册 `scope: "desktop"` 不会影响已经打开的桌面歌词窗口。
