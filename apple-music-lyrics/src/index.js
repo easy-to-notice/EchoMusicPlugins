@@ -7,11 +7,12 @@ import amllCoreCss from "@applemusic-like-lyrics/core/style.css";
 const STORAGE_KEY = "apple-music-lyrics-settings";
 
 const DEFAULT_SETTINGS = {
-  enabled: true,
+  enabled: false,
   hideNativeLyrics: true,
-  enableBlur: true,
+  enableBlur: false,
   enableScale: true,
-  enableSpring: true,
+  enableSpring: false,
+  frameRate: 30,
   alignPosition: 48,
   fadeWidth: 50,
 };
@@ -39,6 +40,7 @@ const normalizeSettings = (value) => {
     enableBlur: source.enableBlur ?? DEFAULT_SETTINGS.enableBlur,
     enableScale: source.enableScale ?? DEFAULT_SETTINGS.enableScale,
     enableSpring: source.enableSpring ?? DEFAULT_SETTINGS.enableSpring,
+    frameRate: clamp(source.frameRate ?? DEFAULT_SETTINGS.frameRate, 15, 60),
     alignPosition: clamp(
       source.alignPosition ?? DEFAULT_SETTINGS.alignPosition,
       25,
@@ -86,7 +88,13 @@ const createFallbackWords = (text, startTime, endTime) => {
   return [{ word: content, startTime, endTime }];
 };
 
-const convertEchoLinesToAmll = (lines) =>
+const shouldShowTranslated = (lyricsMode) =>
+  lyricsMode === "translation" || lyricsMode === "both";
+
+const shouldShowRomanized = (lyricsMode) =>
+  lyricsMode === "romanization" || lyricsMode === "both";
+
+const convertEchoLinesToAmll = (lines, lyricsMode) =>
   (Array.isArray(lines) ? lines : [])
     .map((line, index, sourceLines) => {
       const startTime = getLineStartMs(line);
@@ -110,8 +118,12 @@ const convertEchoLinesToAmll = (lines) =>
         words: timedChars.length
           ? timedChars
           : createFallbackWords(line?.text, startTime, endTime),
-        translatedLyric: String(line?.translated || ""),
-        romanLyric: String(line?.romanized || ""),
+        translatedLyric: shouldShowTranslated(lyricsMode)
+          ? String(line?.translated || "")
+          : "",
+        romanLyric: shouldShowRomanized(lyricsMode)
+          ? String(line?.romanized || "")
+          : "",
         startTime,
         endTime,
         isBG: false,
@@ -138,24 +150,109 @@ const createLinesSignature = (lines) =>
     })
     .join("\n");
 
-const applyPlayerOptions = (entry, snapshot, forceRelayout = false) => {
+const getTimelineMs = (snapshot) =>
+  Math.max(0, Number(snapshot?.timelineMs) || 0);
+
+const isEffectActive = (snapshot) =>
+  Boolean(state?.settings?.enabled && snapshot?.hasLyrics);
+
+const shouldRunAnimation = (snapshot) =>
+  Boolean(isEffectActive(snapshot) && snapshot?.isPlaying);
+
+const getTargetFrameMs = () => {
+  const frameRate = clamp(state?.settings?.frameRate ?? DEFAULT_SETTINGS.frameRate, 15, 60);
+  return 1000 / frameRate;
+};
+
+const syncHostState = (entry, snapshot) => {
   if (!state) return;
   const settings = state.settings;
+  const enabled = isEffectActive(snapshot) ? "true" : "false";
+  const hideNative =
+    isEffectActive(snapshot) && settings.hideNativeLyrics ? "true" : "false";
+
+  if (entry.host.root.dataset.echoAmllEnabled !== enabled) {
+    entry.host.root.dataset.echoAmllEnabled = enabled;
+  }
+  if (entry.host.root.dataset.echoAmllHideNative !== hideNative) {
+    entry.host.root.dataset.echoAmllHideNative = hideNative;
+  }
+};
+
+const ensurePlayer = (entry) => {
+  if (entry.player) return true;
+  entry.player = new LyricPlayer(entry.container);
+  entry.optionsKey = "";
+  entry.optionValues = {};
+  entry.linesSignature = "";
+  entry.linesRef = null;
+  entry.linesLength = 0;
+  return true;
+};
+
+const disposePlayer = (entry) => {
+  if (!entry.player) return;
+  entry.player.dispose?.();
+  entry.player = null;
+  entry.optionsKey = "";
+  entry.optionValues = {};
+  entry.linesSignature = "";
+  entry.linesRef = null;
+  entry.linesLength = 0;
+  entry.lastTimelineMs = Number.NaN;
+  entry.lastPlaying = undefined;
+  entry.container.replaceChildren();
+};
+
+const applyPlayerOptions = (entry, snapshot, forceRelayout = false) => {
+  if (!state) return;
+  syncHostState(entry, snapshot);
+  if (!isEffectActive(snapshot) || !entry.player) return;
+
+  const settings = state.settings;
   const reducedMotion = Boolean(snapshot?.reducedMotion);
+  const options = {
+    blur: Boolean(settings.enableBlur && !reducedMotion),
+    scale: Boolean(settings.enableScale && !reducedMotion),
+    spring: Boolean(settings.enableSpring && !reducedMotion),
+    fadeWidth: Math.max(0.1, settings.fadeWidth / 100),
+    alignPosition: settings.alignPosition / 100,
+  };
+  const optionsKey = [
+    options.blur,
+    options.scale,
+    options.spring,
+    options.fadeWidth,
+    options.alignPosition,
+  ].join("|");
 
-  entry.host.root.dataset.echoAmllEnabled =
-    settings.enabled && snapshot?.hasLyrics ? "true" : "false";
-  entry.host.root.dataset.echoAmllHideNative =
-    settings.enabled && settings.hideNativeLyrics && snapshot?.hasLyrics
-      ? "true"
-      : "false";
+  if (!forceRelayout && entry.optionsKey === optionsKey) return;
+  entry.optionsKey = optionsKey;
 
-  entry.player.setEnableBlur(settings.enableBlur && !reducedMotion);
-  entry.player.setEnableScale(settings.enableScale && !reducedMotion);
-  entry.player.setEnableSpring(settings.enableSpring && !reducedMotion);
-  entry.player.setWordFadeWidth(Math.max(0.1, settings.fadeWidth / 100));
-  entry.player.setAlignAnchor(LayoutAlignAnchor.Center);
-  entry.player.setAlignPosition(settings.alignPosition / 100);
+  if (entry.optionValues.blur !== options.blur) {
+    entry.optionValues.blur = options.blur;
+    entry.player.setEnableBlur(options.blur);
+  }
+  if (entry.optionValues.scale !== options.scale) {
+    entry.optionValues.scale = options.scale;
+    entry.player.setEnableScale(options.scale);
+  }
+  if (entry.optionValues.spring !== options.spring) {
+    entry.optionValues.spring = options.spring;
+    entry.player.setEnableSpring(options.spring);
+  }
+  if (entry.optionValues.fadeWidth !== options.fadeWidth) {
+    entry.optionValues.fadeWidth = options.fadeWidth;
+    entry.player.setWordFadeWidth(options.fadeWidth);
+  }
+  if (entry.optionValues.alignAnchor !== LayoutAlignAnchor.Center) {
+    entry.optionValues.alignAnchor = LayoutAlignAnchor.Center;
+    entry.player.setAlignAnchor(LayoutAlignAnchor.Center);
+  }
+  if (entry.optionValues.alignPosition !== options.alignPosition) {
+    entry.optionValues.alignPosition = options.alignPosition;
+    entry.player.setAlignPosition(options.alignPosition);
+  }
 
   if (forceRelayout && typeof entry.player.calcLayout === "function") {
     void entry.player.calcLayout(false, true);
@@ -163,36 +260,54 @@ const applyPlayerOptions = (entry, snapshot, forceRelayout = false) => {
 };
 
 const syncLines = (entry, snapshot, force = false) => {
+  if (!isEffectActive(snapshot) || !ensurePlayer(entry)) return;
+
+  const lines = Array.isArray(snapshot?.lines) ? snapshot.lines : [];
+  const lyricsMode = snapshot?.lyricsMode || "none";
+  const modeChanged = entry.lyricsMode !== lyricsMode;
+  if (
+    !force &&
+    entry.linesRef === lines &&
+    entry.linesLength === lines.length &&
+    !modeChanged
+  ) {
+    return;
+  }
+
+  entry.linesRef = lines;
+  entry.linesLength = lines.length;
   const signature = createLinesSignature(snapshot?.lines);
-  if (!force && signature === entry.linesSignature) return;
+  if (!force && !modeChanged && signature === entry.linesSignature) return;
 
   entry.linesSignature = signature;
-  const lines = convertEchoLinesToAmll(snapshot?.lines);
-  entry.player.setLyricLines(lines, Math.max(0, Number(snapshot?.timelineMs) || 0));
+  entry.lyricsMode = lyricsMode;
+  const amllLines = convertEchoLinesToAmll(snapshot?.lines, lyricsMode);
+  entry.player.setLyricLines(amllLines, getTimelineMs(snapshot));
   entry.lastTimelineMs = Number.NaN;
   applyPlayerOptions(entry, snapshot, true);
 };
 
-const runFrame = (entry, time) => {
-  if (!mountedHosts.has(entry)) return;
+const stopFrameLoop = (entry) => {
+  if (!entry.frameId) return;
+  window.cancelAnimationFrame(entry.frameId);
+  entry.frameId = 0;
+  entry.lastFrameTime = 0;
+};
 
-  if (!entry.lastFrameTime) entry.lastFrameTime = time;
-  const deltaMs = Math.min(80, Math.max(0, time - entry.lastFrameTime));
-  entry.lastFrameTime = time;
+const updatePlayerTime = (entry, snapshot, deltaMs, forceSeek = false) => {
+  if (!isEffectActive(snapshot)) {
+    entry.player?.pause?.();
+    entry.lastTimelineMs = Number.NaN;
+    return;
+  }
+  if (!entry.player) return;
 
-  const snapshot = entry.host.getSnapshot();
-  entry.snapshot = snapshot;
-  syncLines(entry, snapshot);
-  applyPlayerOptions(entry, snapshot);
-
-  const settings = state?.settings ?? DEFAULT_SETTINGS;
-  const enabled = settings.enabled && snapshot?.hasLyrics;
-  const timelineMs = Math.max(0, Number(snapshot?.timelineMs) || 0);
+  const timelineMs = getTimelineMs(snapshot);
   const expectedTimeline =
     Number.isFinite(entry.lastTimelineMs)
       ? entry.lastTimelineMs + deltaMs * Math.max(0.1, Number(snapshot?.playbackRate) || 1)
       : timelineMs;
-  const isSeek = Math.abs(timelineMs - expectedTimeline) > 700;
+  const isSeek = forceSeek || Math.abs(timelineMs - expectedTimeline) > 700;
 
   if (entry.lastPlaying !== snapshot?.isPlaying) {
     entry.lastPlaying = snapshot?.isPlaying;
@@ -200,15 +315,65 @@ const runFrame = (entry, time) => {
     else entry.player.pause?.();
   }
 
-  if (enabled) {
-    entry.player.setCurrentTime(timelineMs, isSeek);
-    entry.player.update(deltaMs);
-    entry.lastTimelineMs = timelineMs;
+  entry.player.setCurrentTime(timelineMs, isSeek);
+  entry.player.update(deltaMs);
+  entry.lastTimelineMs = timelineMs;
+};
+
+const runFrame = (entry, time) => {
+  if (!mountedHosts.has(entry)) return;
+  entry.frameId = 0;
+
+  if (entry.lastFrameTime && time - entry.lastFrameTime < getTargetFrameMs()) {
+    entry.frameId = window.requestAnimationFrame((nextTime) =>
+      runFrame(entry, nextTime),
+    );
+    return;
   }
 
-  entry.frameId = window.requestAnimationFrame((nextTime) =>
-    runFrame(entry, nextTime),
-  );
+  const deltaMs = Math.min(80, Math.max(0, time - entry.lastFrameTime));
+  entry.lastFrameTime = time;
+
+  const snapshot = entry.host.getSnapshot();
+  entry.snapshot = snapshot;
+  syncHostState(entry, snapshot);
+  updatePlayerTime(entry, snapshot, deltaMs);
+
+  if (shouldRunAnimation(snapshot)) {
+    entry.frameId = window.requestAnimationFrame((nextTime) =>
+      runFrame(entry, nextTime),
+    );
+  } else {
+    entry.lastFrameTime = 0;
+  }
+};
+
+const startFrameLoop = (entry) => {
+  if (entry.frameId || !shouldRunAnimation(entry.snapshot)) return;
+  entry.lastFrameTime = 0;
+  entry.frameId = window.requestAnimationFrame((time) => runFrame(entry, time));
+};
+
+const syncSnapshot = (entry, snapshot, force = false) => {
+  entry.snapshot = snapshot;
+  syncHostState(entry, snapshot);
+
+  if (!isEffectActive(snapshot)) {
+    stopFrameLoop(entry);
+    disposePlayer(entry);
+    return;
+  }
+
+  ensurePlayer(entry);
+  syncLines(entry, snapshot, force);
+  applyPlayerOptions(entry, snapshot, force);
+
+  if (shouldRunAnimation(snapshot)) {
+    startFrameLoop(entry);
+  } else {
+    stopFrameLoop(entry);
+    updatePlayerTime(entry, snapshot, 0, force);
+  }
 };
 
 const mountAmllPageLyrics = (host) => {
@@ -217,38 +382,38 @@ const mountAmllPageLyrics = (host) => {
   container.setAttribute("aria-hidden", "true");
   host.overlay.appendChild(container);
 
-  const player = new LyricPlayer(container);
   const entry = {
     host,
-    player,
+    player: null,
     container,
     snapshot: host.getSnapshot(),
     linesSignature: "",
+    linesRef: null,
+    linesLength: 0,
+    lyricsMode: "none",
     frameId: 0,
     lastFrameTime: 0,
     lastTimelineMs: Number.NaN,
     lastPlaying: undefined,
+    optionsKey: "",
+    optionValues: {},
     unsubscribe: null,
   };
 
   mountedHosts.add(entry);
-  applyPlayerOptions(entry, entry.snapshot, true);
-  syncLines(entry, entry.snapshot, true);
+  syncSnapshot(entry, entry.snapshot, true);
 
   entry.unsubscribe = host.subscribe((snapshot) => {
-    entry.snapshot = snapshot;
-    syncLines(entry, snapshot);
-    applyPlayerOptions(entry, snapshot);
+    syncSnapshot(entry, snapshot);
   });
-  entry.frameId = window.requestAnimationFrame((time) => runFrame(entry, time));
 
   return () => {
     mountedHosts.delete(entry);
     entry.unsubscribe?.();
-    if (entry.frameId) window.cancelAnimationFrame(entry.frameId);
+    stopFrameLoop(entry);
     entry.host.root.removeAttribute("data-echo-amll-enabled");
     entry.host.root.removeAttribute("data-echo-amll-hide-native");
-    entry.player.dispose?.();
+    disposePlayer(entry);
     entry.container.remove();
   };
 };
@@ -388,6 +553,14 @@ const createSettingsComponent = (ctx) =>
           toggle("歌词模糊", "enableBlur", "开启 AMLL 的远离焦点行模糊效果。"),
           toggle("歌词缩放", "enableScale", "开启当前行聚焦缩放。"),
           toggle("弹簧动画", "enableSpring", "开启 AMLL 的弹簧滚动和行切换动画。"),
+          slider(
+            "帧率限制",
+            "frameRate",
+            15,
+            60,
+            "降低帧率可以减少 CPU 占用，默认 30fps。",
+            (value) => `${value}fps`,
+          ),
           slider(
             "对齐位置",
             "alignPosition",
