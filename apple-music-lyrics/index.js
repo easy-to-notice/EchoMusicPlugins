@@ -22211,16 +22211,33 @@ var AMLL_PLUGIN_CSS = `
 .echo-amll-player-shell .amll-lyric-player [class*="_lyricMainLine"] {
   color: var(--echo-amll-unplayed-color, rgba(255, 255, 255, 0.92));
   font-weight: var(--echo-amll-font-weight, 850);
+  text-align: center;
 }
 
 .echo-amll-player-shell .amll-lyric-player [class*="_lyricSubLine"] {
   color: var(--echo-amll-unplayed-color, rgba(255, 255, 255, 0.9));
   opacity: var(--echo-amll-sub-opacity, 0.66) !important;
+  text-align: center;
 }
 
 .echo-amll-player-shell .amll-lyric-player [class*="_lyricBgLine"] {
   color: var(--echo-amll-unplayed-color, rgba(255, 255, 255, 0.86));
   opacity: var(--echo-amll-bg-opacity, 0.58) !important;
+  text-align: center;
+}
+
+.echo-amll-player-shell .amll-lyric-player [class*="_lyricLineWrapper"] {
+  align-items: center;
+  text-align: center;
+}
+
+.echo-amll-player-shell .amll-lyric-player [class*="_lyricLine"] {
+  text-align: center;
+  transform-origin: center;
+}
+
+.echo-amll-player-shell .amll-lyric-player [class*="_lyricMainLine"] span {
+  text-align: center;
 }
 
 .echo-amll-player-shell .amll-lyric-player [class*="_lyricLine"][class*="_active"] [class*="_lyricMainLine"],
