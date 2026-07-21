@@ -1917,7 +1917,7 @@ export function activate(ctx) {
 | `host.root`      | 歌词动效根节点，即 `.echo-lyric-effect-host`。                                |
 | `host.scroller`  | 歌词滚动容器。                                                               |
 | `host.overlay`   | 宿主管理的装饰层，默认 `pointer-events: none`，适合挂 SVG、Canvas、光效层。   |
-| `host.getSnapshot()` | 读取当前歌词快照，包括 `lines`、`currentIndex`、`scrollIndex`、`timelineMs`、`isPlaying`、`lyricsMode`、`collapsed`、`reducedMotion` 等。`timelineMs` 是宿主统一后的歌词时间轴（毫秒，已包含歌词偏移），适合逐帧动画、逐字高亮和滚动计算；不要用 `ctx.player.currentTime` 代替它。 |
+| `host.getSnapshot()` | 读取当前歌词快照，包括 `lines`、`currentIndex`、`scrollIndex`、`timelineMs`、`isPlaying`、`lyricsMode`、`collapsed`、`reducedMotion`、`appearance` 等。`timelineMs` 是宿主统一后的歌词时间轴（毫秒，已包含歌词偏移），适合逐帧动画、逐字高亮和滚动计算；不要用 `ctx.player.currentTime` 代替它。`appearance` 包含宿主歌词外观语义，如 `playedColor`、`unplayedColor`、`fontFamily`、`fontScale`、`fontWeight`，插件应优先复用这些字段而不是读取原生歌词 DOM 样式。 |
 | `host.subscribe(handler)` | 订阅歌词快照更新，返回取消订阅函数；插件停用时宿主也会兜底清理。       |
 | `host.setAutoScrollHandler(handler)` | 接管页面歌词自动跟随滚动。handler 收到 `{ index, targetTop, smooth, collapsed, snapshot }`，返回 `true` 表示插件已处理，宿主不再执行默认 `scrollTo`。 |
 | `host.requestUpdate()` | 请求宿主立即向订阅者派发一次当前快照。                                  |

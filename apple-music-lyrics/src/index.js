@@ -9,6 +9,8 @@ const STORAGE_KEY = "apple-music-lyrics-settings";
 const DEFAULT_SETTINGS = {
   enabled: false,
   hideNativeLyrics: true,
+  followEchoAppearance: true,
+  enhanceContrast: true,
   enableBlur: false,
   enableScale: true,
   enableSpring: false,
@@ -29,6 +31,14 @@ const mountedHosts = new Set();
 const clamp = (value, min, max) =>
   Math.max(min, Math.min(max, Number(value) || 0));
 
+const isSafeCssValue = (value) => {
+  const text = String(value ?? "").trim();
+  return Boolean(text && !/[;{}<>]/.test(text));
+};
+
+const safeCssValue = (value, fallback) =>
+  isSafeCssValue(value) ? String(value).trim() : fallback;
+
 const normalizeSettings = (value) => {
   const source = value && typeof value === "object" ? value : {};
   return {
@@ -37,6 +47,9 @@ const normalizeSettings = (value) => {
     enabled: source.enabled ?? DEFAULT_SETTINGS.enabled,
     hideNativeLyrics:
       source.hideNativeLyrics ?? DEFAULT_SETTINGS.hideNativeLyrics,
+    followEchoAppearance:
+      source.followEchoAppearance ?? DEFAULT_SETTINGS.followEchoAppearance,
+    enhanceContrast: source.enhanceContrast ?? DEFAULT_SETTINGS.enhanceContrast,
     enableBlur: source.enableBlur ?? DEFAULT_SETTINGS.enableBlur,
     enableScale: source.enableScale ?? DEFAULT_SETTINGS.enableScale,
     enableSpring: source.enableSpring ?? DEFAULT_SETTINGS.enableSpring,
@@ -207,6 +220,7 @@ const ensurePlayer = (entry) => {
   entry.playerElement = playerElement;
   entry.optionsKey = "";
   entry.optionValues = {};
+  entry.appearanceKey = "";
   entry.linesSignature = "";
   entry.linesRef = null;
   entry.linesLength = 0;
@@ -223,6 +237,7 @@ const disposePlayer = (entry) => {
   entry.container.dataset.echoAmllReady = "false";
   entry.optionsKey = "";
   entry.optionValues = {};
+  entry.appearanceKey = "";
   entry.linesSignature = "";
   entry.linesRef = null;
   entry.linesLength = 0;
@@ -260,10 +275,57 @@ const schedulePlayerLayout = (entry, snapshot) => {
   });
 };
 
+const applyPlayerAppearance = (entry, snapshot) => {
+  if (!state || !entry.playerElement) return;
+  const settings = state.settings;
+  const appearance = snapshot?.appearance || {};
+  const playedColor = settings.followEchoAppearance
+    ? safeCssValue(appearance.playedColor, "rgba(255, 255, 255, 0.98)")
+    : "rgba(255, 255, 255, 0.98)";
+  const unplayedColor = settings.followEchoAppearance
+    ? safeCssValue(appearance.unplayedColor, "rgba(255, 255, 255, 0.92)")
+    : "rgba(255, 255, 255, 0.92)";
+  const fontFamily = settings.followEchoAppearance
+    ? safeCssValue(appearance.fontFamily, "")
+    : "";
+  const fontScale = settings.followEchoAppearance
+    ? clamp(appearance.fontScale ?? 1, 0.75, 1.5)
+    : 1;
+  const fontWeight = settings.followEchoAppearance
+    ? clamp(appearance.fontWeight ?? 850, 300, 900)
+    : 850;
+  const textShadow = settings.enhanceContrast
+    ? "0 2px 8px rgba(0,0,0,.48), 0 12px 32px rgba(0,0,0,.34)"
+    : safeCssValue(appearance.textShadow, "0 2px 8px rgba(0,0,0,.26)");
+
+  const appearanceKey = [
+    playedColor,
+    unplayedColor,
+    fontFamily,
+    fontScale,
+    fontWeight,
+    textShadow,
+    settings.enhanceContrast,
+  ].join("|");
+  if (entry.appearanceKey === appearanceKey) return;
+  entry.appearanceKey = appearanceKey;
+
+  const style = entry.playerElement.style;
+  style.setProperty("--echo-amll-played-color", playedColor);
+  style.setProperty("--echo-amll-unplayed-color", unplayedColor);
+  style.setProperty("--echo-amll-font-scale", String(fontScale));
+  style.setProperty("--echo-amll-font-weight", String(fontWeight));
+  style.setProperty("--echo-amll-text-shadow", textShadow);
+  style.setProperty("--echo-amll-sub-opacity", settings.enhanceContrast ? "0.66" : "0.56");
+  style.setProperty("--echo-amll-bg-opacity", settings.enhanceContrast ? "0.58" : "0.46");
+  style.fontFamily = fontFamily;
+};
+
 const applyPlayerOptions = (entry, snapshot, forceRelayout = false) => {
   if (!state) return;
   syncHostState(entry, snapshot);
   if (!isEffectActive(snapshot) || !entry.player) return;
+  applyPlayerAppearance(entry, snapshot);
 
   const settings = state.settings;
   const reducedMotion = Boolean(snapshot?.reducedMotion);
@@ -462,6 +524,7 @@ const mountAmllPageLyrics = (host) => {
     lastPlaying: undefined,
     optionsKey: "",
     optionValues: {},
+    appearanceKey: "",
     unsubscribe: null,
   };
 
@@ -515,37 +578,40 @@ const AMLL_PLUGIN_CSS = `
 }
 
 .echo-amll-player-shell .amll-lyric-player {
-  --amll-lp-color: rgba(255, 255, 255, 0.98);
+  --amll-lp-color: var(--echo-amll-played-color, rgba(255, 255, 255, 0.98));
   --amll-lp-bg-color: transparent;
   --amll-lp-hover-bg-color: rgba(255, 255, 255, 0.08);
-  --amll-lp-font-size: clamp(28px, 4.8vh, 54px);
+  --amll-lp-font-size: clamp(28px, calc(4.8vh * var(--echo-amll-font-scale, 1)), 58px);
   --amll-lp-line-width-aspect: 0.86;
   --amll-lp-line-padding-x: 0.35em;
   --amll-lp-bg-line-scale: 0.74;
-  color: rgba(255, 255, 255, 0.98);
+  color: var(--echo-amll-unplayed-color, rgba(255, 255, 255, 0.92));
   mix-blend-mode: normal;
-  text-shadow:
-    0 2px 8px rgba(0, 0, 0, 0.48),
-    0 12px 32px rgba(0, 0, 0, 0.34);
+  text-shadow: var(--echo-amll-text-shadow, 0 2px 8px rgba(0,0,0,.48), 0 12px 32px rgba(0,0,0,.34));
 }
 
 .echo-amll-player-shell .amll-lyric-player [class*="_lyricMainLine"] {
-  color: rgba(255, 255, 255, 0.98);
-  font-weight: 850;
+  color: var(--echo-amll-unplayed-color, rgba(255, 255, 255, 0.92));
+  font-weight: var(--echo-amll-font-weight, 850);
 }
 
 .echo-amll-player-shell .amll-lyric-player [class*="_lyricSubLine"] {
-  color: rgba(255, 255, 255, 0.9);
-  opacity: 0.66 !important;
+  color: var(--echo-amll-unplayed-color, rgba(255, 255, 255, 0.9));
+  opacity: var(--echo-amll-sub-opacity, 0.66) !important;
 }
 
 .echo-amll-player-shell .amll-lyric-player [class*="_lyricBgLine"] {
-  color: rgba(255, 255, 255, 0.86);
-  opacity: 0.58 !important;
+  color: var(--echo-amll-unplayed-color, rgba(255, 255, 255, 0.86));
+  opacity: var(--echo-amll-bg-opacity, 0.58) !important;
 }
 
-.echo-amll-player-shell .amll-lyric-player [class*="_active"] {
-  color: #fff;
+.echo-amll-player-shell .amll-lyric-player [class*="_lyricLine"][class*="_active"] [class*="_lyricMainLine"],
+.echo-amll-player-shell .amll-lyric-player [class*="_lyricMainLine"][class*="_active"] {
+  color: var(--echo-amll-played-color, #fff);
+}
+
+.echo-amll-player-shell .amll-lyric-player [class*="_lyricLine"][class*="_active"] [class*="_lyricSubLine"] {
+  color: var(--echo-amll-played-color, rgba(255, 255, 255, 0.94));
 }
 `;
 
@@ -645,6 +711,8 @@ const createSettingsComponent = (ctx) =>
         h("div", { class: "echo-amll-settings" }, [
           toggle("启用 AMLL", "enabled", "只替换页面歌词的视觉渲染，关闭后回到原生歌词。"),
           toggle("隐藏原生歌词", "hideNativeLyrics", "保留原生歌词作为兜底，但视觉上显示 AMLL。"),
+          toggle("跟随 EchoMusic 外观", "followEchoAppearance", "复用页面歌词的已播放色、未播放色、字体和字重。"),
+          toggle("增强对比度", "enhanceContrast", "保留 AMLL 层次感，同时提高封面背景上的文字可读性。"),
           toggle("歌词模糊", "enableBlur", "开启 AMLL 的远离焦点行模糊效果。"),
           toggle("歌词缩放", "enableScale", "开启当前行聚焦缩放。"),
           toggle("弹簧动画", "enableSpring", "开启 AMLL 的弹簧滚动和行切换动画。"),

@@ -21742,6 +21742,8 @@ var STORAGE_KEY = "apple-music-lyrics-settings";
 var DEFAULT_SETTINGS = {
   enabled: false,
   hideNativeLyrics: true,
+  followEchoAppearance: true,
+  enhanceContrast: true,
   enableBlur: false,
   enableScale: true,
   enableSpring: false,
@@ -21757,6 +21759,11 @@ var settingsStyleDispose = null;
 var saveTimer = 0;
 var mountedHosts = /* @__PURE__ */ new Set();
 var clamp2 = (value, min, max) => Math.max(min, Math.min(max, Number(value) || 0));
+var isSafeCssValue = (value) => {
+  const text = String(value ?? "").trim();
+  return Boolean(text && !/[;{}<>]/.test(text));
+};
+var safeCssValue = (value, fallback) => isSafeCssValue(value) ? String(value).trim() : fallback;
 var normalizeSettings = (value) => {
   const source = value && typeof value === "object" ? value : {};
   return {
@@ -21764,6 +21771,8 @@ var normalizeSettings = (value) => {
     ...source,
     enabled: source.enabled ?? DEFAULT_SETTINGS.enabled,
     hideNativeLyrics: source.hideNativeLyrics ?? DEFAULT_SETTINGS.hideNativeLyrics,
+    followEchoAppearance: source.followEchoAppearance ?? DEFAULT_SETTINGS.followEchoAppearance,
+    enhanceContrast: source.enhanceContrast ?? DEFAULT_SETTINGS.enhanceContrast,
     enableBlur: source.enableBlur ?? DEFAULT_SETTINGS.enableBlur,
     enableScale: source.enableScale ?? DEFAULT_SETTINGS.enableScale,
     enableSpring: source.enableSpring ?? DEFAULT_SETTINGS.enableSpring,
@@ -21887,6 +21896,7 @@ var ensurePlayer = (entry) => {
   entry.playerElement = playerElement;
   entry.optionsKey = "";
   entry.optionValues = {};
+  entry.appearanceKey = "";
   entry.linesSignature = "";
   entry.linesRef = null;
   entry.linesLength = 0;
@@ -21902,6 +21912,7 @@ var disposePlayer = (entry) => {
   entry.container.dataset.echoAmllReady = "false";
   entry.optionsKey = "";
   entry.optionValues = {};
+  entry.appearanceKey = "";
   entry.linesSignature = "";
   entry.linesRef = null;
   entry.linesLength = 0;
@@ -21934,10 +21945,42 @@ var schedulePlayerLayout = (entry, snapshot) => {
     forcePlayerLayout(entry, snapshot);
   });
 };
+var applyPlayerAppearance = (entry, snapshot) => {
+  if (!state || !entry.playerElement) return;
+  const settings2 = state.settings;
+  const appearance = snapshot?.appearance || {};
+  const playedColor = settings2.followEchoAppearance ? safeCssValue(appearance.playedColor, "rgba(255, 255, 255, 0.98)") : "rgba(255, 255, 255, 0.98)";
+  const unplayedColor = settings2.followEchoAppearance ? safeCssValue(appearance.unplayedColor, "rgba(255, 255, 255, 0.92)") : "rgba(255, 255, 255, 0.92)";
+  const fontFamily = settings2.followEchoAppearance ? safeCssValue(appearance.fontFamily, "") : "";
+  const fontScale = settings2.followEchoAppearance ? clamp2(appearance.fontScale ?? 1, 0.75, 1.5) : 1;
+  const fontWeight = settings2.followEchoAppearance ? clamp2(appearance.fontWeight ?? 850, 300, 900) : 850;
+  const textShadow = settings2.enhanceContrast ? "0 2px 8px rgba(0,0,0,.48), 0 12px 32px rgba(0,0,0,.34)" : safeCssValue(appearance.textShadow, "0 2px 8px rgba(0,0,0,.26)");
+  const appearanceKey = [
+    playedColor,
+    unplayedColor,
+    fontFamily,
+    fontScale,
+    fontWeight,
+    textShadow,
+    settings2.enhanceContrast
+  ].join("|");
+  if (entry.appearanceKey === appearanceKey) return;
+  entry.appearanceKey = appearanceKey;
+  const style = entry.playerElement.style;
+  style.setProperty("--echo-amll-played-color", playedColor);
+  style.setProperty("--echo-amll-unplayed-color", unplayedColor);
+  style.setProperty("--echo-amll-font-scale", String(fontScale));
+  style.setProperty("--echo-amll-font-weight", String(fontWeight));
+  style.setProperty("--echo-amll-text-shadow", textShadow);
+  style.setProperty("--echo-amll-sub-opacity", settings2.enhanceContrast ? "0.66" : "0.56");
+  style.setProperty("--echo-amll-bg-opacity", settings2.enhanceContrast ? "0.58" : "0.46");
+  style.fontFamily = fontFamily;
+};
 var applyPlayerOptions = (entry, snapshot, forceRelayout = false) => {
   if (!state) return;
   syncHostState(entry, snapshot);
   if (!isEffectActive(snapshot) || !entry.player) return;
+  applyPlayerAppearance(entry, snapshot);
   const settings2 = state.settings;
   const reducedMotion = Boolean(snapshot?.reducedMotion);
   const options = {
@@ -22103,6 +22146,7 @@ var mountAmllPageLyrics = (host) => {
     lastPlaying: void 0,
     optionsKey: "",
     optionValues: {},
+    appearanceKey: "",
     unsubscribe: null
   };
   mountedHosts.add(entry);
@@ -22152,37 +22196,40 @@ var AMLL_PLUGIN_CSS = `
 }
 
 .echo-amll-player-shell .amll-lyric-player {
-  --amll-lp-color: rgba(255, 255, 255, 0.98);
+  --amll-lp-color: var(--echo-amll-played-color, rgba(255, 255, 255, 0.98));
   --amll-lp-bg-color: transparent;
   --amll-lp-hover-bg-color: rgba(255, 255, 255, 0.08);
-  --amll-lp-font-size: clamp(28px, 4.8vh, 54px);
+  --amll-lp-font-size: clamp(28px, calc(4.8vh * var(--echo-amll-font-scale, 1)), 58px);
   --amll-lp-line-width-aspect: 0.86;
   --amll-lp-line-padding-x: 0.35em;
   --amll-lp-bg-line-scale: 0.74;
-  color: rgba(255, 255, 255, 0.98);
+  color: var(--echo-amll-unplayed-color, rgba(255, 255, 255, 0.92));
   mix-blend-mode: normal;
-  text-shadow:
-    0 2px 8px rgba(0, 0, 0, 0.48),
-    0 12px 32px rgba(0, 0, 0, 0.34);
+  text-shadow: var(--echo-amll-text-shadow, 0 2px 8px rgba(0,0,0,.48), 0 12px 32px rgba(0,0,0,.34));
 }
 
 .echo-amll-player-shell .amll-lyric-player [class*="_lyricMainLine"] {
-  color: rgba(255, 255, 255, 0.98);
-  font-weight: 850;
+  color: var(--echo-amll-unplayed-color, rgba(255, 255, 255, 0.92));
+  font-weight: var(--echo-amll-font-weight, 850);
 }
 
 .echo-amll-player-shell .amll-lyric-player [class*="_lyricSubLine"] {
-  color: rgba(255, 255, 255, 0.9);
-  opacity: 0.66 !important;
+  color: var(--echo-amll-unplayed-color, rgba(255, 255, 255, 0.9));
+  opacity: var(--echo-amll-sub-opacity, 0.66) !important;
 }
 
 .echo-amll-player-shell .amll-lyric-player [class*="_lyricBgLine"] {
-  color: rgba(255, 255, 255, 0.86);
-  opacity: 0.58 !important;
+  color: var(--echo-amll-unplayed-color, rgba(255, 255, 255, 0.86));
+  opacity: var(--echo-amll-bg-opacity, 0.58) !important;
 }
 
-.echo-amll-player-shell .amll-lyric-player [class*="_active"] {
-  color: #fff;
+.echo-amll-player-shell .amll-lyric-player [class*="_lyricLine"][class*="_active"] [class*="_lyricMainLine"],
+.echo-amll-player-shell .amll-lyric-player [class*="_lyricMainLine"][class*="_active"] {
+  color: var(--echo-amll-played-color, #fff);
+}
+
+.echo-amll-player-shell .amll-lyric-player [class*="_lyricLine"][class*="_active"] [class*="_lyricSubLine"] {
+  color: var(--echo-amll-played-color, rgba(255, 255, 255, 0.94));
 }
 `;
 var SETTINGS_CSS = `
@@ -22269,6 +22316,8 @@ var createSettingsComponent = (ctx) => ctx.vue.defineComponent({
     return () => h2("div", { class: "echo-amll-settings" }, [
       toggle("\u542F\u7528 AMLL", "enabled", "\u53EA\u66FF\u6362\u9875\u9762\u6B4C\u8BCD\u7684\u89C6\u89C9\u6E32\u67D3\uFF0C\u5173\u95ED\u540E\u56DE\u5230\u539F\u751F\u6B4C\u8BCD\u3002"),
       toggle("\u9690\u85CF\u539F\u751F\u6B4C\u8BCD", "hideNativeLyrics", "\u4FDD\u7559\u539F\u751F\u6B4C\u8BCD\u4F5C\u4E3A\u515C\u5E95\uFF0C\u4F46\u89C6\u89C9\u4E0A\u663E\u793A AMLL\u3002"),
+      toggle("\u8DDF\u968F EchoMusic \u5916\u89C2", "followEchoAppearance", "\u590D\u7528\u9875\u9762\u6B4C\u8BCD\u7684\u5DF2\u64AD\u653E\u8272\u3001\u672A\u64AD\u653E\u8272\u3001\u5B57\u4F53\u548C\u5B57\u91CD\u3002"),
+      toggle("\u589E\u5F3A\u5BF9\u6BD4\u5EA6", "enhanceContrast", "\u4FDD\u7559 AMLL \u5C42\u6B21\u611F\uFF0C\u540C\u65F6\u63D0\u9AD8\u5C01\u9762\u80CC\u666F\u4E0A\u7684\u6587\u5B57\u53EF\u8BFB\u6027\u3002"),
       toggle("\u6B4C\u8BCD\u6A21\u7CCA", "enableBlur", "\u5F00\u542F AMLL \u7684\u8FDC\u79BB\u7126\u70B9\u884C\u6A21\u7CCA\u6548\u679C\u3002"),
       toggle("\u6B4C\u8BCD\u7F29\u653E", "enableScale", "\u5F00\u542F\u5F53\u524D\u884C\u805A\u7126\u7F29\u653E\u3002"),
       toggle("\u5F39\u7C27\u52A8\u753B", "enableSpring", "\u5F00\u542F AMLL \u7684\u5F39\u7C27\u6EDA\u52A8\u548C\u884C\u5207\u6362\u52A8\u753B\u3002"),
