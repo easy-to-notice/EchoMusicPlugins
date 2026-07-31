@@ -81,7 +81,7 @@ export function deactivate(ctx) {
 
 ## 窗口入口
 
-窗口脚本可以导出 `activateWindow(ctx)`、`activate(ctx)` 或默认函数。入口上下文独立于主插件上下文，只提供窗口渲染所需的 Vue、容器、私有存储、CSS 注入、Now Playing、字体、音频频谱、受控文件、本地进程、本地 Web 服务和当前窗口控制 API。
+窗口脚本可以导出 `activateWindow(ctx)`、`activate(ctx)` 或默认函数。入口上下文独立于主插件上下文，只提供窗口渲染所需的 Vue、容器、私有存储、CSS 注入、Now Playing、字体、宿主图标、主题图标封面、音频频谱、受控文件、本地进程、本地 Web 服务和当前窗口控制 API。
 
 ```js
 export function activateWindow(ctx) {
@@ -118,6 +118,16 @@ export function activateWindow(ctx) {
   app.mount(ctx.container);
   ctx.dispose(() => app.unmount());
 }
+```
+
+浮窗上下文提供 `ctx.icons` 和 `ctx.cover.createThemedIconCoverUrl({ icon, color? })`。如果要生成和当前播放外观一致的图标封面，推荐显式使用 `ctx.nowPlaying` 快照里的主题色：
+
+```js
+const snapshot = await ctx.nowPlaying.getSnapshot();
+const coverUrl = ctx.cover.createThemedIconCoverUrl({
+  icon: ctx.icons.iconPulse,
+  color: snapshot.appearance.accentColor,
+});
 ```
 
 ## Now Playing

@@ -348,6 +348,7 @@ export default {
 | `ctx.theme.pageTransition.clear()`                                    | 清理当前插件提交的页面动效设置                                                                                                                                                                                                                                                                                                                                                                                |
 | `ctx.theme.accentGradient.set(options)`                               | 请求宿主调整顶部主题色渐变氛围层（横跨侧栏与内容顶部的色带），支持颜色、角度、高度、透明度与暗色独立覆盖 |
 | `ctx.theme.accentGradient.clear()`                                    | 清理当前插件提交的顶部渐变配置 |
+| `ctx.cover.createThemedIconCoverUrl({ icon, color? })`                | 生成与 EchoMusic 内置详情页一致的主题色图标封面；不传 `color` 时主插件上下文跟随当前主题色，插件浮窗建议显式传入快照里的 `appearance.accentColor` |
 | `ctx.nowPlaying`                                                      | 当前播放/歌词/外观快照 API，可读取快照、订阅变化、发送播放与歌词命令                                                                                                                                                                                                                                                                                                                                          |
 | `ctx.desktopLyric`                                                    | 桌面歌词 API：`getSnapshot()`、`getWindow()`、`show()`、`hide()`、`updateSettings(partial)`、`updateWindow(bounds)`；可调整原桌面歌词窗口设置和受控窗口尺寸                                                                                                                                                                                                                                                     |
 | `ctx.scroll`                                                          | 页面滚动容器 API：`queryContainers()`、`getCurrentContainer()`、`getState(el)`、`scrollToTop(el?)`、`scrollToBottom(el?)`、`observeContainers(handler)`；用于滚动增强插件，避免依赖宿主内部 DOM 类名                                                                                                                                                                                                            |
@@ -463,6 +464,8 @@ off(); // 主动退订；插件禁用/卸载时也会自动退订
 
 `ctx.ui.cover.setFallback(resolver)` 用于接管「无封面」或「封面加载失败」时的显示。同一时刻只有最后注册的兜底生效，禁用插件时自动清理。
 
+如果只是想生成一张和内置「我最喜爱」「私人 FM」风格一致的图标封面，使用 `ctx.cover.createThemedIconCoverUrl(...)` 即可，不需要注册全局兜底。
+
 ```js
 const dispose = ctx.ui.cover.setFallback({
   id: "cover-fallback", // 可选，缺省为 "default"
@@ -470,7 +473,10 @@ const dispose = ctx.ui.cover.setFallback({
     // 必须同步返回字符串（图片 URL / data: URI）；返回 null/undefined 表示放弃，回退到宿主默认封面
     if (context.reason === "empty") {
       // 无封面：用主题色生成一张占位图
-      return makeSvgCover(context.accentColor, context.size);
+      return ctx.cover.createThemedIconCoverUrl({
+        icon: ctx.icons.iconMusic,
+        color: context.accentColor,
+      });
     }
     return null; // 封面加载失败时交还宿主默认处理
   },
@@ -1348,6 +1354,31 @@ const Icon = ctx.vue.resolveComponent("Icon");
 h(Icon, { icon: ctx.icons.iconPictureInPicture, width: 16, height: 16 });
 ```
 
+### 主题图标封面
+
+`ctx.cover.createThemedIconCoverUrl({ icon, color? })` 会返回一段 `data:image/svg+xml` URL，用于生成和内置详情页一致的主题色图标封面。主插件上下文中不传 `color` 会使用当前主题色；如果你需要和某首歌、某个窗口快照或自定义页面主题对齐，可以传入十六进制颜色。
+
+```js
+const favoriteCover = ctx.cover.createThemedIconCoverUrl({
+  icon: ctx.icons.iconHeartFilled,
+});
+
+const cloudCover = ctx.cover.createThemedIconCoverUrl({
+  icon: ctx.icons.iconCloud,
+  color: "#0ea5e9",
+});
+```
+
+插件浮窗也提供同名 API 和 `ctx.icons`。浮窗运行时没有主界面的主题 store，推荐从 `ctx.nowPlaying` 快照取当前外观色：
+
+```js
+const snapshot = await ctx.nowPlaying.getSnapshot();
+const coverUrl = ctx.cover.createThemedIconCoverUrl({
+  icon: ctx.icons.iconPulse,
+  color: snapshot.appearance.accentColor,
+});
+```
+
 ## UI 能力
 
 插件既可以用稳定的宿主贡献 API，也可以直接介入主界面 DOM。
@@ -1356,6 +1387,7 @@ h(Icon, { icon: ctx.icons.iconPictureInPicture, width: 16, height: 16 });
 - `ctx.ui.sidebar.addItem(...)`：为插件页面或自定义动作注册正式侧边栏导航入口，支持路由匹配、高亮和折叠侧栏图标。
 - `ctx.ui.settings.define(...)`：声明插件设置入口，传入自定义 Vue 组件自由渲染。
 - `ctx.ui.cover.setFallback(...)`：设置无封面或封面加载失败时的显示图片。
+- `ctx.cover.createThemedIconCoverUrl(...)`：生成 EchoMusic 内置风格的主题色图标封面。
 - `ctx.ui.addSongContextMenuItem(...)`：注册歌曲右键菜单项。
 - `ctx.ui.mount(selectorOrElement, component, options)`：把 Vue 组件挂载到任意 DOM 位置。
 - `ctx.ui.teleport(component, options)`：把 Vue 组件挂载到 `document.body`，适合全局浮层/悬浮窗。
