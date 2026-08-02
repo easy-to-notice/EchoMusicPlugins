@@ -257,6 +257,6 @@ await ctx.host.showOnTop('main', { focus: false }); // 仅抬层，不抢焦点
 
 窗口入口中的 `ctx.audio.spectrum` 与主插件入口一致，用于读取或订阅音频频谱。使用前仍需在 manifest 中声明 `capabilities.audioSpectrum: true`。
 
-窗口入口中的 `ctx.fs` 与主插件入口一致，用于将本地文件转换为可渲染 URL，或在声明 `capabilities.localFiles: true` 后扫描、读取本地媒体文件，以及写入当前插件目录内的缓存、图片或导出文件。
+窗口入口中的 `ctx.fs` 与主插件入口一致，用于将本地文件转换为可渲染 URL，或在声明 `capabilities.localFiles: true` 后扫描、读取本地媒体文件、读取音频 metadata，以及写入当前插件目录内的缓存、图片或导出文件。`readAudioMetadata(filePath)` 需要包含该 API 的 EchoMusic 主程序版本；依赖它的插件应通过 `requires.echoMusicVersion` 做版本门槛。
 
 窗口入口中的 `ctx.fonts` 与主插件入口一致，可通过 `getAll()` 获取系统字体列表，通过 `getOptions({ includeFollow: true })` 获取适合设置面板的字体选项，通过 `buildFamily(fontName)` 构建可直接用于 inline style 的 CSS `font-family`。

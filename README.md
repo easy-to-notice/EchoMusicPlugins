@@ -191,7 +191,7 @@ pnpm exec electron . --safe-mode
 
 `capabilities.audioSpectrum` 可选。插件如需通过 `ctx.audio.spectrum` 读取或订阅音频频谱数据，必须显式设为 `true`。该能力会启动系统音频捕获订阅，请只在可视化或音频分析插件中声明。
 
-`capabilities.localFiles` 可选。插件如需通过 `ctx.fs.listFiles()` 扫描本地音乐目录，通过 `ctx.fs.readTextFile()` / `ctx.fs.readFileBytes()` 读取用户本地文件内容，或通过 `ctx.fs.writeFile()` 写入插件目录内文件，必须显式设为 `true`。适合本地播放、本地媒体库、CUE/M3U/LRC 解析、插件生成缓存图片或图标等场景。播放音频文件本身应使用 `ctx.fs.getFileUrl()` 转成 URL 后交给播放器，不要通过 IPC 读取整首音频。
+`capabilities.localFiles` 可选。插件如需通过 `ctx.fs.listFiles()` 扫描本地音乐目录，通过 `ctx.fs.readTextFile()` / `ctx.fs.readFileBytes()` / `ctx.fs.readAudioMetadata()` 读取用户本地文件信息，或通过 `ctx.fs.writeFile()` 写入插件目录内文件，必须显式设为 `true`。适合本地播放、本地媒体库、CUE/M3U/LRC 解析、插件生成缓存图片或图标等场景。播放音频文件本身应使用 `ctx.fs.getFileUrl()` 转成 URL 后交给播放器，不要通过 IPC 读取整首音频。
 
 `capabilities.lyricEffects` 可选。插件如需通过 `ctx.lyricEffects.register()` 调整页面歌词或桌面歌词排版、动效或挂载歌词装饰层，必须显式设为 `true`。适合水波歌词、KTV 字幕模板、当前行辉光、歌词背景水印、竖排桌面歌词等视觉插件。该能力只影响歌词显示，不提供歌词内容解析；提供歌词内容请使用 `capabilities.lyrics`。
 
@@ -331,6 +331,7 @@ export default {
 | `ctx.fs.getFileUrl(filePath)`                                         | 将用户选择的本地文件路径转换为可播放或可渲染的 `file://` URL                                                                                                                                                                                                                                                                                                                                                  |
 | `ctx.fs.readTextFile(filePath, options?)`                             | 读取本地文本文件片段，默认最多 1 MB，最大 4 MB，要求 manifest 声明 `capabilities.localFiles: true`                                                                                                                                                                                                                                                                                                            |
 | `ctx.fs.readFileBytes(filePath, options?)`                            | 读取本地文件字节片段，适合解析音频头部或标签，默认最多 1 MB，最大 4 MB，要求 manifest 声明 `capabilities.localFiles: true`                                                                                                                                                                                                                                                                                    |
+| `ctx.fs.readAudioMetadata(filePath)`                                  | 读取本地音频标签和时长，返回标准化标题、歌手、专辑、年份、曲序等信息，要求 manifest 声明 `capabilities.localFiles: true`；新增插件使用时请通过 `requires.echoMusicVersion` 限制到包含该 API 的主程序版本                                                                                                                                                                                                       |
 | `ctx.fs.writeFile(filePath, data, options?)`                          | 写入插件目录内文件，支持字符串、`ArrayBuffer`、`Uint8Array` 和 `{ type: "base64", data }`，默认不覆盖已有文件，最大 8 MB，要求 manifest 声明 `capabilities.localFiles: true`                                                                                                                                                                                                                                  |
 | `ctx.fs.deleteFile(filePath)`                                         | 删除插件目录内文件，仅删除文件不删除目录，要求 manifest 声明 `capabilities.localFiles: true`                                                                                                                                                                                                                                                                                                                  |
 | `ctx.appIcons.refresh()`                                              | 重新读取插件存储中的应用图标配置并尝试刷新托盘、任务栏/窗口和桌面快捷方式图标                                                                                                                                                                                                                                                                                                                                  |
@@ -518,6 +519,8 @@ const isLinux = ctx.electron.platform === "linux";
   }
 }
 ```
+
+`ctx.fs` 下的文件枚举、URL 转换、文本读取、字节读取、音频 metadata 读取、写入和删除接口均为异步 Promise。插件应使用 `await`，不要在渲染循环或同步 resolver 中直接等待文件 IO；需要展示封面、播放本地文件或返回歌词时，先在初始化、设置保存或用户选择文件阶段把 URL/metadata 预取并缓存到插件状态。
 
 #### 删除文件
 
@@ -1611,7 +1614,26 @@ if (result.ok) {
 }
 ```
 
-`ctx.fs.readTextFile(filePath, options?)` 适合读取 `.lrc`、`.cue`、`.m3u` 等文本片段；`ctx.fs.readFileBytes(filePath, options?)` 适合读取音频头部做标签解析。两者默认最多读取 1 MB，最大 4 MB；播放整首音频请使用 `getFileUrl()`，不要通过 IPC 读取完整音频文件。
+`listFiles()` 返回的 `kind` 由宿主统一分类：`audio`、`image`、`lyric`、`playlist`、`cue` 或 `other`。其中 `audio` 使用 EchoMusic 本地播放格式清单，当前包括 `aac`、`aif`、`aiff`、`alac`、`ape`、`caf`、`dff`、`dsf`、`flac`、`m4a`、`mp3`、`oga`、`ogg`、`opus`、`wav`、`wave`、`webm`、`wma`、`wv`。云盘上传额外支持的业务格式不等同于本地播放清单。
+
+如果只需要音频文件，可以显式传 `kinds: ["audio"]`；如果插件自己维护扩展名白名单，也可以传 `extensions`。`extensions` 和 `kinds` 都会在主进程侧过滤，适合大目录扫描。
+
+`ctx.fs.readAudioMetadata(filePath)` 适合本地媒体库构建歌名、歌手、专辑和时长索引；它在主进程异步解析，不需要插件通过 `readFileBytes()` 自己读取音频头部：
+
+```js
+const metadata = await ctx.fs.readAudioMetadata(first.path);
+if (metadata.ok) {
+  console.log(metadata.title, metadata.artist, metadata.duration);
+} else {
+  console.warn(metadata.error);
+}
+```
+
+成功结果会包含文件信息 `name`、`path`、`url`、`size`、`modifiedAt`、`extension`、`relativePath`、`kind`，以及音频信息 `title`、`artist`、`album`、`duration`、`year`、`track`、`disk`、`genre`。`title` 一定有值：标签解析失败时宿主会按文件名降级；`metadataParsed` 表示是否成功读到标签，`metadataError` 会在解析失败但文件本身可用时返回错误摘要。
+
+该 API 需要包含本地音频 metadata 能力的 EchoMusic 主程序版本。插件如果依赖它，应在 `manifest.json` 中设置合适的 `requires.echoMusicVersion`，避免旧主程序启用后运行时报错。
+
+`ctx.fs.readTextFile(filePath, options?)` 适合读取 `.lrc`、`.cue`、`.m3u` 等文本片段；`ctx.fs.readFileBytes(filePath, options?)` 适合读取小型二进制片段或自定义格式头部。两者默认最多读取 1 MB，最大 4 MB；播放整首音频请使用 `getFileUrl()`，不要通过 IPC 读取完整音频文件。
 
 `ctx.fs.writeFile(filePath, data, options?)` 只允许写入当前插件目录内的文件，目标路径可以是相对插件目录的路径，也可以是插件目录内的绝对路径。默认自动创建父目录，默认不覆盖已有文件；如需覆盖，显式传入 `overwrite: true`。单次写入最大 8 MB，适合保存插件生成的缓存、图片、图标或配置导出文件。
 
