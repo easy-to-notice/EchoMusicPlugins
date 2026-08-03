@@ -126,7 +126,7 @@ EchoMusic --safe-mode
 pnpm exec electron . --safe-mode
 ```
 
-插件禁用或卸载前，运行时会调用插件的 `deactivate(ctx)`，随后清理通过宿主 API 注册的页面、统一设置、歌曲菜单、命令、事件监听、`ctx.css.inject` 样式、manifest 样式、`ctx.lyricEffects` 歌词动效、`ctx.ui.mount` / `ctx.ui.teleport` 挂载组件和 `ctx.dom.observe` 监听。插件如果直接修改 DOM 或注册了宿主无法感知的全局副作用，应通过 `ctx.dispose(() => ...)` 或 `deactivate(ctx)` 自行归还。
+插件禁用或卸载前，运行时会调用插件的 `deactivate(ctx)`，随后清理通过宿主 API 注册的页面、统一设置、歌曲菜单、命令、事件监听、应用内快捷键、系统级全局快捷键、`ctx.css.inject` 样式、manifest 样式、`ctx.lyricEffects` 歌词动效、`ctx.ui.mount` / `ctx.ui.teleport` 挂载组件和 `ctx.dom.observe` 监听。插件如果直接修改 DOM 或注册了宿主无法感知的全局副作用，应通过 `ctx.dispose(() => ...)` 或 `deactivate(ctx)` 自行归还。
 
 卸载插件会删除插件目录、移除启用状态、清除已追踪的插件私有 KV 数据，并清除与该插件相关的最近故障记录。
 
@@ -360,7 +360,8 @@ export default {
 | `ctx.electron.platform`                                               | 当前平台：`'darwin'` / `'win32'` / `'linux'`                                                                                                                                                                                                                                                                                                                                                                  |
 | `ctx.css.inject(cssText, options?)`                                   | 注入全局 CSS，禁用插件时自动清理                                                                                                                                                                                                                                                                                                                                                                              |
 | `ctx.commands.register(id, handler)`                                  | 注册插件命令                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `ctx.shortcuts.register(accelerator, handler)`                        | 注册自定义快捷键，支持 `'Ctrl+A'`、`'Shift+Right'`、`'CmdOrCtrl+S'` 等标准 Electron 加速器格式；返回清理函数，插件卸载时自动解绑                                                                                                                                                                                                                                                                             |
+| `ctx.shortcuts.register(accelerator, handler)`                        | 注册应用内快捷键，窗口获得焦点时生效；支持 `'Ctrl+A'`、`'Shift+Right'`、`'CmdOrCtrl+S'` 等标准 Electron 加速器格式；返回清理函数，插件卸载时自动解绑                                                                                                                                                                                                                                                        |
+| `ctx.shortcuts.registerGlobal(accelerator, handler)`                  | 注册系统级全局快捷键，EchoMusic 在后台时也可触发；返回 `Promise<dispose>`，注册失败时抛出冲突或格式错误；依赖该 API 的插件建议设置 `requires.echoMusicVersion` 到包含该能力的 EchoMusic 版本                                                                                                                                                                                                                |
 | `ctx.events.onTrackChange(handler)`                                   | 监听当前曲目变化                                                                                                                                                                                                                                                                                                                                                                                              |
 | `ctx.events.onPlaybackChange(handler)`                                | 监听播放/暂停状态变化                                                                                                                                                                                                                                                                                                                                                                                         |
 | `ctx.events.onPlaybackStateChange(handler)`                           | 监听播放展示状态变化，handler 收到 `loading` / `playing` / `paused` / `error`                                                                                                                                                                                                                                                                                                                                |
@@ -1008,9 +1009,9 @@ export async function activate(ctx) {
 - `handler` 抛错时宿主会记录插件运行异常并返回 500，不会拖垮播放器主流程。
 - `ctx.webServer` 也会出现在插件浮窗上下文中，适合由浮窗里的开关控制服务启停。
 
-### 注册快捷键
+### 注册应用内快捷键
 
-插件可以使用 `ctx.shortcuts.register(accelerator, handler)` 注册自定义快捷键：
+插件可以使用 `ctx.shortcuts.register(accelerator, handler)` 注册应用内快捷键。应用内快捷键只在 EchoMusic 窗口获得焦点时生效，适合插件页面、播放页增强和临时操作：
 
 ```js
 export function activate(ctx) {
@@ -1059,9 +1060,54 @@ export function activate(ctx) {
 - `ctx.shortcuts.register()` 返回清理函数，插件卸载时会自动解绑
 - 同一个快捷键可以被多个插件注册，按注册顺序依次触发
 
+### 注册全局快捷键
+
+插件可以使用 `ctx.shortcuts.registerGlobal(accelerator, handler)` 注册系统级全局快捷键。全局快捷键在 EchoMusic 处于后台时也会触发，适合媒体控制、外部设备联动、全局显示/隐藏浮窗等场景。
+
+如果插件依赖该能力，请在 manifest 中用 `requires.echoMusicVersion` 限制到包含该 API 的 EchoMusic 版本，例如：
+
+```json
+{
+  "requires": {
+    "echoMusicVersion": ">=2.2.9-beta.24"
+  }
+}
+```
+
+基础用法：
+
+```js
+export async function activate(ctx) {
+  if (!ctx.shortcuts.registerGlobal) {
+    ctx.toast.warning("当前 EchoMusic 版本不支持插件全局快捷键");
+    return;
+  }
+
+  await ctx.shortcuts.registerGlobal("CmdOrCtrl+Alt+Right", () => {
+    const currentTime = ctx.player.currentTime.value;
+    const duration = ctx.player.duration.value;
+    ctx.player.seek(Math.min(duration, currentTime + 10));
+    ctx.toast.success("全局快进 10 秒");
+  });
+
+  await ctx.shortcuts.registerGlobal("CmdOrCtrl+Alt+Left", () => {
+    const currentTime = ctx.player.currentTime.value;
+    ctx.player.seek(Math.max(0, currentTime - 10));
+    ctx.toast.success("全局快退 10 秒");
+  });
+}
+```
+
+**注意事项：**
+- 全局快捷键不需要额外 manifest capability，但需要 EchoMusic 版本支持该 API
+- `ctx.shortcuts.registerGlobal()` 返回 `Promise<dispose>`；插件卸载时会自动解绑，也可以手动调用返回的清理函数
+- 如果快捷键已被系统、EchoMusic 内置全局快捷键或其他插件占用，注册会抛出错误
+- 同一个全局快捷键同一时间只能有一个注册者，建议使用带多个修饰键的组合
+- macOS 首次使用全局快捷键时可能受系统权限、输入法或其他应用占用影响；注册失败时应给用户清晰提示
+
 ### 控制播放位置（快进快退）
 
-插件可以通过三种方式实现快进快退：
+插件可以通过三种方式实现快进快退。推荐优先复用宿主的 `seekForward` / `seekBackward` 命令，这样会自动使用用户在 EchoMusic 设置中配置的快进/快退步长。
 
 #### 方式 1：直接使用 `ctx.player.seek()`
 
@@ -1084,13 +1130,13 @@ export function activate(ctx) {
 }
 ```
 
-#### 方式 2：使用系统快捷键命令
+#### 方式 2：使用宿主快进快退命令
 
-EchoMusic 2.2.6+ 支持系统级的 `seekForward` 和 `seekBackward` 命令，偏移量由用户设置：
+EchoMusic 支持 `seekForward` 和 `seekBackward` 命令，偏移量由用户在设置中配置：
 
 ```js
 export function activate(ctx) {
-  // 使用系统快进快退设置（默认 5 秒）
+  // 使用用户设置的快进快退步长
   ctx.shortcuts.register('Alt+Right', () => {
     ctx.nowPlaying.command('seekForward');
   });
@@ -1098,6 +1144,25 @@ export function activate(ctx) {
   ctx.shortcuts.register('Alt+Left', () => {
     ctx.nowPlaying.command('seekBackward');
   });
+}
+```
+
+也可以注册成系统级全局快捷键：
+
+```js
+export async function activate(ctx) {
+  if (!ctx.shortcuts.registerGlobal) return;
+
+  try {
+    await ctx.shortcuts.registerGlobal("CmdOrCtrl+Alt+Right", () => {
+      ctx.nowPlaying.command("seekForward");
+    });
+    await ctx.shortcuts.registerGlobal("CmdOrCtrl+Alt+Left", () => {
+      ctx.nowPlaying.command("seekBackward");
+    });
+  } catch (error) {
+    ctx.toast.warning(`全局快进快退快捷键注册失败：${error?.message || error}`);
+  }
 }
 ```
 
